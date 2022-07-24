@@ -1,0 +1,149 @@
+/**
+ * Welcome to CSML Studio!
+ *
+ * This simple CSML starter flow works out of the box, and you can easily
+ * try it on the right hand side by clicking on `build and run`.
+ *
+ * Some useful CSML links:
+ * 👉 Getting started: https://docs.csml.dev/studio/getting-started
+ * 👉 Give CSML a 🌟 on Github: https://github.com/CSML-by-Clevy/csml-engine
+ * 👉 Join the CSML community on Slack: https://csml.dev/slack
+ */
+start:
+  say "Bienvenido, este es un chatbot de soporte! 👋"
+  hold
+  do inDialogFlow = App("dialogflow", text="text", language="es-ES")
+  remember saludo = event
+  do stepDesc = ""
+  goto welcome
+
+welcome:
+  //Init STEP_1 in MySQL, validate welcome
+  remember stepDesc = "STEP_1"
+  say Typing(2000)
+  do inWelcome = App("mysql", query="SELECT `keywords` FROM initial WHERE `option_key` = ?", values=[stepDesc])
+  do resWelcome = App("mysql", query="SELECT `replyMessage` FROM response WHERE `option_key` = ?", values=[stepDesc])
+
+  do arrWelcome = inWelcome.data[0].keywords.split(",")
+  do flagWelcome = 0
+
+  foreach (item) in arrWelcome {
+    if (saludo.to_string().contains(item)) {
+      remember flagWelcome = 1
+    }
+  }
+
+ if (flagWelcome > 0) {
+    say Typing(2000)
+    say "{{resWelcome.data[0].replyMessage}}"
+  }else{
+    do resError = App("mysql", query="SELECT `descError` FROM error WHERE `option_key` = ?", values=[stepDesc])
+    say "{{resError.data[0].descError}}. {{resWelcome.data[0].replyMessage}}"
+  }
+
+  goto validate
+
+validate:
+  //Init STEP_2 in MySQL, attend the customer
+  remember stepDesc = "STEP_2"
+  hold
+  do resWelcome = App("mysql", query="SELECT `replyMessage` FROM response WHERE `option_key` = ?", values=[stepDesc])
+  say Typing(2000)
+  say "{{resWelcome.data[0].replyMessage}}"
+  hold
+  remember dni = event
+  say Typing(2000)
+
+  do result = App("mysql", query="SELECT * FROM `user` WHERE `dni` = ?", values=[dni])
+
+  if (result.success) {
+    if(result.data.length() > 0){
+      say "Bienvenido {{result.data[0].Apellidos_Nombres}}"
+      goto selectOption
+    }else{
+      do resError = App("mysql", query="SELECT `descError` FROM error WHERE `option_key` = ?", values=[stepDesc])
+      say "{{resError.data[0].descError}}"
+      goto validate
+    }
+  }
+
+selectOption:
+  //Init STEP_3 in MySQL, select option
+  remember stepDesc = "STEP_3"
+  do cbOption = App("mysql", query="SELECT `desc` FROM optionDesc WHERE parent IS NULL")
+
+  say QuickReply(
+    "En que  podemos ayudarte?",
+    buttons=[
+      Button("{{cbOption.data[0].desc}}"),
+      Button("{{cbOption.data[1].desc}}"),
+      Button("{{cbOption.data[2].desc}}")
+    ]
+  )
+
+  hold
+
+  say Typing(2000)
+  remember optionSelect = event
+  goto selectOptionChild
+
+selectOptionChild:
+  //Init STEP_4 in MySQL, select child option
+  remember stepDesc = "STEP_4"
+  do cbOptionChild = App("mysql", query="SELECT `desc` FROM optionDesc WHERE parent = ?", values=["{{event.to_string().slice(0,1)}}"])
+
+  say QuickReply(
+    "¿Cual es el inconveniente?",
+    buttons=[
+      Button("{{cbOptionChild.data[0].desc}}"),
+      Button("{{cbOptionChild.data[1].desc}}"),
+      Button("{{cbOptionChild.data[2].desc}}")
+    ]
+  )
+
+  hold
+  say Typing(2000)
+  remember optionChildSelect = event
+  goto solvError
+
+solvError:
+  remember stepDesc = "STEP_5"
+  do resSolution = App("mysql", query="SELECT `replyMessage` FROM response WHERE `option_key` = ?", values=[stepDesc])
+  say "{{resSolution.data[0].replyMessage}}"
+  say Typing(2000)
+  say "www.EmpresaTelefonica.com/soporte/" + optionSelect.to_string().slice(0,1)
+  hold
+  say Typing(2000)
+  remember persError = event
+  goto errError
+
+errError:
+  say Typing(2000)
+  remember stepDesc = "STEP_4"
+  do inFinish = App("mysql", query="SELECT `keywords` FROM initial WHERE `option_key` = ?", values=[stepDesc])
+  do resFinish = App("mysql", query="SELECT `replyMessage` FROM response WHERE `option_key` = ?", values=[stepDesc])
+  do resError = App("mysql", query="SELECT `descError` FROM error WHERE `option_key` = ?", values=[stepDesc])
+
+  do arrFinish = inFinish.data[0].keywords.split(",")
+  do flagSolution = 0
+
+  foreach (item) in arrFinish {
+    if (persError.to_string().contains(item)) {
+      remember flagSolution = 1
+    }
+  }
+
+  //if (persError.to_string().contains("resolvio") || persError.to_string().contains("arreglo") || persError.to_string().contains("soluciono")) {
+  if(flagSolution > 0){
+    say "{{resFinish.data[0].replyMessage}}"
+  }else{
+    if (optionSelect.to_string().slice(0,1) == "1") {
+      say "{{resError.data[0].descError}}"
+      say "Debido a nuestra disponibilidad del personal, la cita se agendará el dia Lunes 23/07/22 en un intervalo de horario de 10 am a 1 pm"
+
+    }else{
+      say "Al parecer el problema se debe a otro factor, lo enviare con una asesor humano para que pueda ayudarlo."
+    }
+    say "Lamento no ser de ayuda"
+  }
+  goto end
